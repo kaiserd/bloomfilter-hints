@@ -1,0 +1,366 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE rfc SYSTEM "rfc2629.dtd" [
+
+<!ENTITY rfc2119 PUBLIC ''
+   'http://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.2119.xml'>
+<!ENTITY rfc6762 PUBLIC ''
+   'http://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.6762.xml'>
+<!ENTITY rfc6763 PUBLIC ''
+   'http://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.6763.xml'>
+
+<!ENTITY I-D.ietf-dnssd-pairing PUBLIC ''
+   "http://xml2rfc.ietf.org/public/rfc/bibxml3/reference.I-D.ietf-dnssd-pairing">
+<!ENTITY I-D.ietf-dnssd-privacy PUBLIC ''
+   "http://xml2rfc.ietf.org/public/rfc/bibxml3/reference.I-D.ietf-dnssd-privacy">
+]>
+
+<?xml-stylesheet type='text/xsl' href='rfc2629.xslt' ?>
+<?rfc compact="yes"?>
+<?rfc toc="yes"?>
+<?rfc symrefs="yes"?>
+<?rfc sortrefs="yes"?>
+
+<!-- Expand crefs and put them inline -->
+<?rfc comments='yes' ?>
+<?rfc inline='yes' ?>
+
+<rfc category="std"
+     docName="draft-kaiser-dnssd-bloomfilter-hints-00"
+     ipr="trust200902">
+
+<front>
+    <title abbrev="DNS-SD Bloomfilter Hints">
+      Efficient Hinting for Privacy Preserving DNS-SD using Bloomfilters
+    </title>
+
+   <author fullname="Daniel Kaiser" initials="D." surname="Kaiser">
+      <organization>University of Luxembourg</organization>
+      <address>
+        <postal>
+          <street>6, avenue de la Fonte</street>
+          <city>Esch-sur-Alzette</city>
+          <code>4364</code>
+          <region></region>
+          <country>Luxembourg</country>
+        </postal>
+        <email>daniel.kaiser@uni.lu</email>
+        <uri>https://secan-lab.uni.lu/</uri>
+      </address>
+    </author>
+
+    <date year="2018" />
+
+    <abstract>
+      <t>
+While DNS-SD over mDNS significantly improves the convenience of network configuration,
+parts of the published information may seriously breach the users' privacy.
+Currently discussed privacy extensions either are not efficient in terms of multicast messages sent,
+reduce privacy and complicate key revocation by introducing an 1:m pairing system,
+or use trial encryptions which are inefficient in terms of necessary computational power.
+      </t>
+
+      <t>
+The method proposed in this document leverages Bloomfilters to significantly reduce the number of multicast (public) messages
+for a DNS-SD privacy extension based on an 1:1 pairing mechanism.
+This allows keeping the advantages of both an 1:1 pairing system and a hinting system
+that does not require trial encryptions, while mitigating the main disadvantage:
+multicast messages sent.
+        </t>
+    </abstract>
+</front>
+
+<middle>
+<section title="Introduction">
+
+<t>
+DNS-SD <xref target="RFC6763" /> over mDNS <xref target="RFC6762" /> enables zero-configuration service discovery in local networks.
+While it significantly improves the convenience of network configuration,
+parts of the published information may seriously breach the users' privacy.
+These privacy issues and potential solutions are discussed in <xref target="KW14a" />, <xref target="KW14b" />, and <xref target="K17" />.
+</t>
+
+<t>
+  [[TODO]]
+</t>
+
+<t>
+This document proposes leveraging Bloomfilters to significantly reduce the number of multicast (public) messages
+for a DNS-SD privacy extension like  <xref target="I-D.ietf-dnssd-privacy" />,
+which is based on an 1:1 pairing mechanism (e.g. <xref target="I-D.ietf-dnssd-pairing" />).
+</t>
+
+
+<section title="Requirements">
+<t>
+  The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT",
+  "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this
+  document are to be interpreted as described in <xref target="RFC2119" />.
+</t>
+</section>
+</section>
+
+<section title="Bloomfilter-based Discovery Protocol" anchor="protocol">
+
+  <section title="Basic Idea">
+    <t>
+      Instead of transmitting a lot of discovery messages containing HASH(&lt;nonce&gt;|&lt;pairing key&gt;),
+      sending a single discovery message containing a Bloomfilter over the respective hashes will significantly reduce the number of necessary discovery messages.
+    </t>
+
+    <t>
+      False positives are not a problem. They will only cause an additional pair of unicast messages.
+    </t>
+  </section>
+
+  <section title="Overview">
+<t>
+  This section provides an overview over Bloomfilter-based hinting,
+  illustrated by various scenarios where Alice searches for service instances of type _type and Bob offers such an instance.
+This type could be a _psds service instance for a two-stage discovery system, or any other type for a one-stage discovery system.
+</t>
+
+<t>
+  In the following, [bf_1],...,[bf_n] are Bloomfilters whose construction is described in <xref target="bloomfilter_construction" />.
+  As we can store at least 25 hints in one Bloomfilter with a very low false positive rate (see <xref target="bloomfilter_gain" />),
+  n is expected to be very low.
+</t>
+
+<t>
+  If a pairing exists:
+</t>
+
+<t>
+<figure>
+<artwork>
+    Alice                                         Bob
+    
+     _type PTR ?
+                  ------------------------&gt;
+                                          _type PTR [bf_1]._type
+                                            ...
+                                          _type PTR [bf_n]._type
+                  &lt;------------------------
+
+    [bf_1]._type SRV,TXT ?
+                  ------------------------&gt;
+                              ENCRYPT_k(SRV,TXT, A (of host as glue))
+                  &lt;------------------------
+
+    connect to service
+                  ------------------------&gt;
+</artwork>
+</figure>
+</t>
+
+<t>
+  Only the first two messages are multicast (public).
+</t>
+<t>
+  The encrypted message SHOULD be padded in such a way that each answer message has the same length,
+  so that answers from the server are indistinguishable from randomly selected bits for an unpaired device.
+</t>
+
+<t>
+  For checking a hint, Alice pre-calculates a list of HASH(derive(secret)||nonce) for all her pairings per time interval,
+  and checks if any of these are in the Bloomfilter.
+  This is even more efficient than checking whether n received hashes are in a pre-calculated hash table as
+  described in <xref target="I-D.ietf-dnssd-privacy" />.
+</t>
+
+
+<t>
+  If no pairing exists, and the hint is not false positive:
+</t>
+
+
+<figure>
+<artwork>
+    Alice                                         Bob
+    
+     _type PTR ?
+                  ------------------------&gt;
+                                          _type PTR [bf_1]._type
+                                            ...
+                                          _type PTR [bf_n]._type
+                  &lt;------------------------
+     no match
+</artwork>
+</figure>
+
+<t>
+  In this case, a lot of messages are saved, as a severely compressed version (1:25)
+  of the hints was sufficient for Alice to realize that this service instance was not
+  meant for her.
+</t>
+
+<t>
+  If no pairing exists, and the hint is a false positive:
+</t>
+
+<figure>
+<artwork>
+    Alice                                         Bob
+    
+     _type PTR ?
+                  ------------------------&gt;
+                                          _type PTR [bf_1]._type
+                                            ...
+                                          _type PTR [bf_n]._type
+                  &lt;------------------------
+
+    [bf_1]._type SRV,TXT ?
+                  ------------------------&gt;
+                              ENCRYPT_k(SRV,TXT, A (of host as glue))
+                  &lt;------------------------
+
+    decryption failed
+</artwork>
+</figure>
+
+<t>
+  In the case of a false positive,
+  only a pair of additional multicast messages and the corresponding cryptographic operations are needed.
+  With a false positive rate of 1:16000 (see <xref target="bloomfilter_gain" />), this effect is negligible.
+</t>
+<t>
+  This case also applies to an attacker trying to deceive Bob.
+</t>
+
+</section>
+
+
+
+<section title="Direct Resolving" anchor="direct_resolving">
+  <t>
+    [[TODO: Show a diagram of the message flow for direct resolving.]]
+  </t>
+</section>
+
+
+</section>
+
+<section title="Bloomfilter Hints">
+
+<section title="Performance Analysis" anchor="bloomfilter_gain">
+  <t>
+    As specified in <xref target="RFC6763" />, the maximum length of a service instance name is 63 bytes.
+    As DNS labels are allowed to contain binary data, this allows a 504 bit wide Bloomfilter.
+  </t>
+
+  <t>
+    Using classical Bloomfilters [[we could discuss more efficient alternatives]]
+    setting the maximum hints per Bloomfilter to 25 results in a desirable false positive rate
+    of 1 in 16000.
+    This means, using the proposed Bloomfilter-based hinting method, the necessary
+    multicast (public) discovery messages can be reduced by factor 25 at the cost of
+    one additional set of messages for every 16000 discovery messages.
+    Further, the server needs additional computational power for constructing the bloomfilter.
+    However, given the efficiently of Bloomfilter construction, this is negligible.
+    The difference in needed computational power on the client is negligible as well.
+  </t>
+
+  <t>
+    [[TODO: elaborate]]
+  </t>
+
+</section>
+
+  
+<section title="Construction of Bloomfilter Hints" anchor="bloomfilter_construction">
+<t>
+The Bloomfilters, [bf_1],...,[bf_n], in the
+protocol description above, are constructed as follows:
+</t>
+
+<t>
+<list style="symbols">
+<t>
+  Initialize  bf_1 as a 504 bit wide Bloomfilter.
+</t>
+<t>
+  For each paired client p, put an identifier of the form HASH(derive(secret_p)||nonce)
+  into a Bloomfilter bf_1.
+  The nonce is constructed as described in Section 3.4 of <xref target="I-D.ietf-dnssd-privacy" />.
+</t>
+<t>
+  If there are 25 elements in the Bloomfilter, start a new Bloomfilter bf_{i+1} and repeat from step 2.
+</t>
+<t>
+  Use the Bloomfilters bf_1,...,bf_n as service instance names of service instances of type _type.
+</t>
+</list>
+</t>
+</section>
+
+</section>
+
+<section title="Security Considerations" anchor="security">
+  <t>
+    [[TODO]]
+  </t>
+</section>
+
+<section title="IANA Considerations" anchor="iana">
+<t>
+This draft does not require any IANA action.
+</t>
+</section>
+
+<section title="Acknowledgments">
+    <t>
+    </t>
+</section>
+
+</middle>
+
+<back>
+<references title="Informative References">
+  &rfc2119;
+  &rfc6762;
+  &rfc6763;
+  &I-D.ietf-dnssd-pairing;
+  &I-D.ietf-dnssd-privacy;
+
+<reference anchor="KW14a" target="http://ieeexplore.ieee.org/xpl/articleDetails.jsp?arnumber=7011331">
+  <front>
+    <title>Adding Privacy to Multicast DNS Service Discovery</title>
+    <author initials="D." surname="Kaiser" fullname="Daniel Kaiser">
+      <organization/>
+    </author>
+    <author initials="M." surname="Waldvogel" fullname="Marcel Waldvogel">
+      <organization/>
+    </author>
+    <date year="2014"/>
+  </front>
+  <seriesInfo name="DOI" value="10.1109/TrustCom.2014.107"/>
+</reference>
+
+<reference anchor="KW14b" target="http://ieeexplore.ieee.org/xpl/articleDetails.jsp?arnumber=7056899">
+  <front>
+    <title>Efficient Privacy Preserving Multicast DNS Service Discovery</title>
+    <author initials="D." surname="Kaiser" fullname="Daniel Kaiser">
+      <organization/>
+    </author>
+    <author initials="M." surname="Waldvogel" fullname="Marcel Waldvogel">
+      <organization/>
+    </author>
+    <date year="2014"/>
+  </front>
+  <seriesInfo name="DOI" value="10.1109/HPCC.2014.141"/>
+</reference>
+
+<reference anchor="K17" target="http://nbn-resolving.de/urn:nbn:de:bsz:352-0-422757">
+  <front>
+    <title>Efficient Privacy-Preserving Configurationless Service Discovery Supporting Multi-Link Networks</title>
+    <author initials="D." surname="Kaiser" fullname="Daniel Kaiser">
+      <organization/>
+    </author>
+    <date year="2017"/>
+  </front>
+</reference>
+
+
+</references>
+</back>
+</rfc>
